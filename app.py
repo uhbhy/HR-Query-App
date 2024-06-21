@@ -4,6 +4,11 @@ from whoosh.index import create_in, open_dir
 from whoosh.fields import Schema, TEXT, ID
 from whoosh.qparser import QueryParser
 import fitz  # PyMuPDF
+import docx  # python-docx
+import pythoncom
+import win32com.client as win32
+import re
+import pandas as pd
 
 # Database Management
 import sqlite3
@@ -46,6 +51,33 @@ def extract_text_from_pdf(pdf_path):
         st.error(f"Error reading {pdf_path}: {e}")
     return text
 
+# Function to extract text from a DOCX file
+def extract_text_from_docx(docx_path):
+    text = ""
+    try:
+        doc = docx.Document(docx_path)
+        for para in doc.paragraphs:
+            text += para.text + "\n"
+    except Exception as e:
+        st.error(f"Error reading {docx_path}: {e}")
+    return text
+
+# Function to extract text from a DOC file
+def extract_text_from_doc(doc_path):
+    text = ""
+    try:
+        pythoncom.CoInitialize()
+        word = win32.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(doc_path)
+        text = doc.Content.Text
+        doc.Close(False)
+        word.Quit()
+        pythoncom.CoUninitialize()
+    except Exception as e:
+        st.error(f"Error reading {doc_path}: {e}")
+    return text
+
 # Initialize Whoosh index
 index_dir = "index_dir"
 if not os.path.exists(index_dir):
@@ -59,10 +91,19 @@ def index_resumes(directory):
     try:
         writer = index.writer()
         for filename in os.listdir(directory):
-            if filename.endswith(".pdf"):
-                filepath = os.path.join(directory, filename)
-                text = extract_text_from_pdf(filepath)
-                writer.add_document(filename=filename, text=text)
+            filepath = os.path.join(directory, filename)
+            if os.path.exists(filepath):
+                if filename.endswith(".pdf"):
+                    text = extract_text_from_pdf(filepath)
+                    writer.add_document(filename=filename, text=text)
+                elif filename.endswith(".docx"):
+                    text = extract_text_from_docx(filepath)
+                    writer.add_document(filename=filename, text=text)
+                elif filename.endswith(".doc"):
+                    text = extract_text_from_doc(filepath)
+                    writer.add_document(filename=filename, text=text)
+            else:
+                st.error(f"File not found: {filepath}")
         writer.commit()
     except Exception as e:
         st.error(f"Error indexing resumes: {e}")
@@ -78,6 +119,12 @@ def search_resumes(query):
     parsed_query = query_parser.parse(' OR '.join(keywords))
     results = searcher.search(parsed_query)
     return results
+
+# Function to highlight keywords in the text
+def highlight_keywords(text, keywords):
+    for keyword in keywords:
+        text = re.sub(f"(?i)({keyword})", r'<mark>\1</mark>', text)
+    return text
 
 # Streamlit app
 def main():
@@ -112,12 +159,32 @@ def main():
                     try:
                         # Perform search
                         results = search_resumes(keywords)
+                        keyword_list = keywords.replace(',', ' ').split()
 
                         # Display search results
                         st.write(f"Found {len(results)} CV(s) matching the search criteria:")
+
+                        data = []
                         for result in results:
+                            text = result['text']
+                            highlighted_text = highlight_keywords(text, keyword_list)
+
+                            # Find the few lines around the keyword
+                            lines = highlighted_text.split('\n')
+                            matched_lines = []
+                            for line in lines:
+                                if any(keyword.lower() in line.lower() for keyword in keyword_list):
+                                    matched_lines.append(line)
+                            
+                            preview_text = '\n'.join(matched_lines[:3])  # Display up to 3 matching lines
+
                             st.write(f"**Filename:** {result['filename']}")
-                            st.write(f"**Preview:** {result['text'][:500]}...")  # Display first 500 characters as a preview
+                            st.markdown(f"<pre>{preview_text}</pre>", unsafe_allow_html=True)  # Replace this line
+
+                            data.append([result['filename'], preview_text])
+                        
+                        df = pd.DataFrame(data, columns=["Filename", "Preview"])
+                        st.table(df)
                     except Exception as e:
                         st.error(f"An error occurred during the search: {e}")
             else:
