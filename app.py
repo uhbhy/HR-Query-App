@@ -147,7 +147,7 @@ def main():
     if choice == "Home":
         if st.session_state.logged_in:
             # Specify the path to your CV directory
-            cv_directory = "D:/cv DIRECTORY"  # Change to your CV directory
+            cv_directory = "<specify your file path here>"  # Change to your CV directory
 
             # Index resumes (you can run this once to create the index)
             index_resumes(cv_directory)
