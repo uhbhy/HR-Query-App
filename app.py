@@ -6,9 +6,10 @@ from whoosh.qparser import QueryParser
 import fitz  # PyMuPDF
 import docx  # python-docx
 import pythoncom
-import win32com.client as win32
+import win32com.client
 import re
 import pandas as pd
+import urllib.parse
 
 # Database Management
 import sqlite3
@@ -66,16 +67,24 @@ def extract_text_from_docx(docx_path):
 def extract_text_from_doc(doc_path):
     text = ""
     try:
-        pythoncom.CoInitialize()
-        word = win32.Dispatch("Word.Application")
-        word.Visible = False
+        doc_path = os.path.abspath(doc_path)
+        doc_path = urllib.parse.unquote(doc_path)  # Decode URL-encoded characters
+        
+        if not os.path.exists(doc_path):
+            st.error(f"File not found: {doc_path}")
+            return text
+        
+        pythoncom.CoInitialize()  # Initialize the COM library
+        word = win32com.client.Dispatch("Word.Application")
+        word.visible = False
         doc = word.Documents.Open(doc_path)
         text = doc.Content.Text
         doc.Close(False)
         word.Quit()
-        pythoncom.CoUninitialize()
     except Exception as e:
         st.error(f"Error reading {doc_path}: {e}")
+    finally:
+        pythoncom.CoUninitialize()  # Uninitialize the COM library
     return text
 
 # Initialize Whoosh index
@@ -147,7 +156,7 @@ def main():
     if choice == "Home":
         if st.session_state.logged_in:
             # Specify the path to your CV directory
-            cv_directory = "<specify your file path here>"  # Change to your CV directory
+            cv_directory = "D:/cv DIRECTORY"  # Change to your CV directory
 
             # Index resumes (you can run this once to create the index)
             index_resumes(cv_directory)
@@ -175,14 +184,19 @@ def main():
                             for line in lines:
                                 if any(keyword.lower() in line.lower() for keyword in keyword_list):
                                     matched_lines.append(line)
-                            
+
                             preview_text = '\n'.join(matched_lines[:3])  # Display up to 3 matching lines
 
                             st.write(f"**Filename:** {result['filename']}")
-                            st.markdown(f"<pre>{preview_text}</pre>", unsafe_allow_html=True)  # Replace this line
+                            
+                            # Get the full file path
+                            file_path = os.path.join(cv_directory, result['filename'])
+                            st.write(f"**File Path:** {file_path}")
+
+                            st.markdown(f"<pre>{preview_text}</pre>", unsafe_allow_html=True)  # Display matched lines
 
                             data.append([result['filename'], preview_text])
-                        
+
                         df = pd.DataFrame(data, columns=["Filename", "Preview"])
                         st.table(df)
                     except Exception as e:
